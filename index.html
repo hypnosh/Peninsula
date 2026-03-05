@@ -1,0 +1,1858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--
+  PENINSULA — Industrial Strategy Game
+  Version: 0.1.0
+  Structure:
+    1. CSS Variables & Reset
+    2. Layout & Map
+    3. HUD & Header
+    4. Overlay Panels (Factory, Market, Contracts, Score)
+    5. Tooltip & Notifications
+    6. JS: Constants
+    7. JS: State
+    8. JS: Map Generation
+    9. JS: Market Engine
+    10. JS: AI Rivals
+    11. JS: Factory Engine
+    12. JS: Contract Engine
+    13. JS: Game Loop (real-time)
+    14. JS: Render
+    15. JS: UI / Event Handlers
+    16. JS: Init
+-->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PENINSULA</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne+Mono&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+
+<style>
+/* ============================================================
+   1. CSS VARIABLES & RESET
+   ============================================================ */
+:root {
+  --bg:        #0c0f0a;
+  --surface:   #141810;
+  --surface2:  #1c221a;
+  --border:    #2a3328;
+  --border2:   #3a4a38;
+
+  --cement:    #c8b89a;
+  --steel:     #7ab8d4;
+  --rubber:    #8cc870;
+
+  --gold:      #e8c840;
+  --red:       #e05050;
+  --green:     #60c080;
+  --dim:       #4a5a48;
+  --text:      #c8d8c0;
+  --textdim:   #7a9078;
+
+  --p1-color:  #e8c840; /* Player */
+  --p2-color:  #e05050; /* Rival A */
+  --p3-color:  #7ab8d4; /* Rival B */
+  --p4-color:  #c870a0; /* Rival C */
+
+  --panel-bg:  rgba(12, 15, 10, 0.96);
+  --panel-border: #3a4a38;
+
+  --cell-size: 40px;
+  --cols: 20;
+  --rows: 16;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Syne', sans-serif;
+  font-size: 14px;
+  height: 100vh;
+  overflow: hidden;
+  user-select: none;
+}
+
+button {
+  font-family: 'Syne Mono', monospace;
+  cursor: pointer;
+}
+
+/* ============================================================
+   2. LAYOUT & MAP
+   ============================================================ */
+#game-root {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#map-viewport {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 60px 16px 16px;
+}
+
+#map-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--cols), var(--cell-size));
+  grid-template-rows: repeat(var(--rows), var(--cell-size));
+  gap: 1px;
+  margin: 0 auto;
+  width: fit-content;
+}
+
+.cell {
+  width: var(--cell-size);
+  height: var(--cell-size);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  position: relative;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: filter 0.1s;
+}
+
+.cell:hover { filter: brightness(1.3); }
+
+/* Terrain base colors */
+.cell[data-terrain="sea"]      { background: #0a1520; }
+.cell[data-terrain="coast"]    { background: #0f2035; }
+.cell[data-terrain="plains"]   { background: #141c10; }
+.cell[data-terrain="forest"]   { background: #0e1a0c; }
+.cell[data-terrain="hills"]    { background: #1a1a14; }
+.cell[data-terrain="resource"] { background: #1a1c10; }
+
+/* Peninsula tints */
+.cell[data-peninsula="A"] { box-shadow: inset 0 0 0 1px rgba(232,200,64,0.12); }
+.cell[data-peninsula="B"] { box-shadow: inset 0 0 0 1px rgba(122,184,212,0.12); }
+.cell[data-peninsula="C"] { box-shadow: inset 0 0 0 1px rgba(140,200,112,0.12); }
+
+.cell-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  pointer-events: none;
+}
+
+/* Owner dot */
+.cell-owner {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+/* Road/ship indicators */
+.cell-road {
+  position: absolute;
+  bottom: 2px;
+  left: 2px;
+  font-size: 9px;
+  color: var(--dim);
+}
+
+/* ============================================================
+   3. HUD & HEADER
+   ============================================================ */
+#hud {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 52px;
+  background: rgba(12,15,10,0.97);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 0;
+  z-index: 100;
+  padding: 0 12px;
+}
+
+#hud-logo {
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: 6px;
+  color: var(--gold);
+  margin-right: 20px;
+  text-transform: uppercase;
+}
+
+.hud-sep {
+  width: 1px;
+  height: 28px;
+  background: var(--border);
+  margin: 0 12px;
+}
+
+.hud-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 70px;
+}
+
+.hud-stat-label {
+  font-family: 'Syne Mono', monospace;
+  font-size: 9px;
+  color: var(--dim);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.hud-stat-val {
+  font-family: 'Syne Mono', monospace;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.hud-stat-val.gold  { color: var(--gold); }
+.hud-stat-val.green { color: var(--green); }
+.hud-stat-val.red   { color: var(--red); }
+
+#hud-spacer { flex: 1; }
+
+.hud-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 3px;
+  margin-left: 6px;
+  transition: border-color 0.15s, color 0.15s;
+}
+.hud-btn:hover { border-color: var(--gold); color: var(--gold); }
+.hud-btn.active { border-color: var(--gold); color: var(--gold); background: rgba(232,200,64,0.08); }
+
+#pause-btn {
+  background: var(--gold);
+  color: #000;
+  border: none;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 3px;
+  margin-left: 10px;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+#pause-btn:hover { background: #f0d040; }
+#pause-btn.paused { background: var(--surface2); color: var(--green); border: 1px solid var(--green); }
+
+/* Turn / time */
+#hud-turn {
+  font-family: 'Syne Mono', monospace;
+  font-size: 11px;
+  color: var(--textdim);
+  margin-left: 10px;
+}
+
+/* ============================================================
+   4. OVERLAY PANELS
+   ============================================================ */
+.overlay-panel {
+  position: fixed;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  z-index: 200;
+  display: none;
+  flex-direction: column;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.7);
+  min-width: 320px;
+  max-height: 80vh;
+  overflow: hidden;
+}
+
+.overlay-panel.open { display: flex; }
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.panel-title {
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+.panel-close {
+  background: none;
+  border: none;
+  color: var(--dim);
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 4px;
+  transition: color 0.1s;
+}
+.panel-close:hover { color: var(--text); }
+
+.panel-body {
+  overflow-y: auto;
+  padding: 14px 16px;
+  flex: 1;
+}
+
+.panel-footer {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+/* Shared form elements inside panels */
+.field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.field-label {
+  font-size: 12px;
+  color: var(--textdim);
+  font-family: 'Syne Mono', monospace;
+}
+
+.field-val {
+  font-family: 'Syne Mono', monospace;
+  font-size: 13px;
+  color: var(--text);
+}
+
+input[type="number"], select {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  font-family: 'Syne Mono', monospace;
+  font-size: 13px;
+  padding: 4px 8px;
+  border-radius: 3px;
+  width: 90px;
+  text-align: right;
+}
+
+input[type="number"]:focus, select:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+
+.section-label {
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 8px;
+  margin-top: 14px;
+  font-family: 'Syne Mono', monospace;
+}
+
+.section-label:first-child { margin-top: 0; }
+
+.btn-primary {
+  background: var(--gold);
+  color: #000;
+  border: none;
+  padding: 7px 16px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  transition: background 0.15s;
+}
+.btn-primary:hover { background: #f0d040; }
+.btn-primary:disabled { background: var(--surface2); color: var(--dim); cursor: not-allowed; }
+
+.btn-secondary {
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border2);
+  padding: 7px 16px;
+  border-radius: 3px;
+  font-size: 12px;
+  transition: border-color 0.15s;
+}
+.btn-secondary:hover { border-color: var(--text); }
+
+.btn-danger {
+  background: transparent;
+  color: var(--red);
+  border: 1px solid var(--red);
+  padding: 5px 12px;
+  border-radius: 3px;
+  font-size: 11px;
+  transition: background 0.15s;
+}
+.btn-danger:hover { background: rgba(224,80,80,0.1); }
+
+/* Commodity color chips */
+.chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 2px;
+  font-size: 11px;
+  font-family: 'Syne Mono', monospace;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+.chip-cement { background: rgba(200,184,154,0.15); color: var(--cement); }
+.chip-steel  { background: rgba(122,184,212,0.15); color: var(--steel); }
+.chip-rubber { background: rgba(140,200,112,0.15); color: var(--rubber); }
+
+/* --- Panel: BUILD FACTORY --- */
+#panel-build {
+  top: 70px;
+  left: 16px;
+  width: 340px;
+}
+
+/* --- Panel: FACTORY DETAIL --- */
+#panel-factory {
+  top: 70px;
+  right: 16px;
+  width: 360px;
+}
+
+.factory-throughput-bar {
+  height: 6px;
+  background: var(--surface2);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.factory-throughput-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s;
+}
+
+/* --- Panel: MARKET --- */
+#panel-market {
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 480px;
+}
+
+.market-row {
+  display: grid;
+  grid-template-columns: 1fr 80px 80px 80px 90px;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-family: 'Syne Mono', monospace;
+  font-size: 13px;
+}
+
+.market-row:last-child { border-bottom: none; }
+
+.market-header {
+  font-size: 9px;
+  color: var(--dim);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 0 0 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.price-up   { color: var(--green); }
+.price-down { color: var(--red); }
+.price-flat { color: var(--textdim); }
+
+.spark {
+  display: inline-flex;
+  gap: 2px;
+  align-items: flex-end;
+  height: 20px;
+}
+.spark-bar {
+  width: 4px;
+  background: var(--border2);
+  border-radius: 1px;
+  transition: height 0.3s;
+}
+
+/* --- Panel: CONTRACTS --- */
+#panel-contracts {
+  bottom: 16px;
+  right: 16px;
+  width: 400px;
+  max-height: 50vh;
+}
+
+.contract-row {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.contract-row:last-child { margin-bottom: 0; }
+
+.contract-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.contract-from {
+  font-size: 11px;
+  color: var(--textdim);
+  font-family: 'Syne Mono', monospace;
+}
+
+.contract-terms {
+  font-size: 13px;
+  font-family: 'Syne Mono', monospace;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.contract-actions { display: flex; gap: 6px; justify-content: flex-end; }
+
+.btn-accept {
+  background: rgba(96,192,128,0.15);
+  color: var(--green);
+  border: 1px solid var(--green);
+  padding: 4px 12px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-family: 'Syne Mono', monospace;
+  transition: background 0.15s;
+}
+.btn-accept:hover { background: rgba(96,192,128,0.25); }
+
+.btn-reject {
+  background: transparent;
+  color: var(--dim);
+  border: 1px solid var(--border2);
+  padding: 4px 12px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-family: 'Syne Mono', monospace;
+  transition: border-color 0.15s;
+}
+.btn-reject:hover { border-color: var(--red); color: var(--red); }
+
+/* Active contracts list */
+.active-contract-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-family: 'Syne Mono', monospace;
+  font-size: 12px;
+}
+.active-contract-row:last-child { border-bottom: none; }
+
+/* --- Panel: SCORE --- */
+#panel-score {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 400px;
+  text-align: center;
+}
+
+.score-big {
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: 52px;
+  color: var(--gold);
+  margin: 16px 0 4px;
+}
+
+.score-label {
+  font-size: 11px;
+  color: var(--dim);
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  font-family: 'Syne Mono', monospace;
+}
+
+/* ============================================================
+   5. TOOLTIP & NOTIFICATIONS
+   ============================================================ */
+#tooltip {
+  position: fixed;
+  background: rgba(12,15,10,0.97);
+  border: 1px solid var(--border2);
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-family: 'Syne Mono', monospace;
+  pointer-events: none;
+  z-index: 500;
+  display: none;
+  max-width: 200px;
+  line-height: 1.6;
+  color: var(--text);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+}
+#tooltip.visible { display: block; }
+
+#notif-stack {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 6px;
+  z-index: 400;
+  pointer-events: none;
+}
+
+.notif {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-left: 3px solid var(--gold);
+  border-radius: 3px;
+  padding: 7px 12px;
+  font-family: 'Syne Mono', monospace;
+  font-size: 12px;
+  color: var(--text);
+  animation: notifIn 0.2s ease;
+  max-width: 280px;
+}
+.notif.notif-good { border-left-color: var(--green); }
+.notif.notif-bad  { border-left-color: var(--red); }
+
+@keyframes notifIn {
+  from { opacity: 0; transform: translateX(-10px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Mode cursor indicator */
+#mode-indicator {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(12,15,10,0.9);
+  border: 1px solid var(--border2);
+  border-radius: 20px;
+  padding: 5px 16px;
+  font-size: 11px;
+  font-family: 'Syne Mono', monospace;
+  color: var(--textdim);
+  pointer-events: none;
+  z-index: 300;
+}
+
+#mode-indicator span { color: var(--gold); }
+</style>
+</head>
+<body>
+<div id="game-root">
+
+  <!-- MAP -->
+  <div id="map-viewport">
+    <div id="map-grid"></div>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div id="hud-logo">Peninsula</div>
+
+    <div class="hud-sep"></div>
+
+    <div class="hud-stat">
+      <span class="hud-stat-label">Cash</span>
+      <span class="hud-stat-val gold" id="hud-cash">$100.00</span>
+    </div>
+
+    <div class="hud-sep"></div>
+
+    <div class="hud-stat">
+      <span class="hud-stat-label">Income/s</span>
+      <span class="hud-stat-val" id="hud-income">$0.00</span>
+    </div>
+
+    <div class="hud-sep"></div>
+
+    <div class="hud-stat">
+      <span class="hud-stat-label">Factories</span>
+      <span class="hud-stat-val" id="hud-factories">0</span>
+    </div>
+
+    <div class="hud-sep"></div>
+
+    <div class="hud-stat">
+      <span class="hud-stat-label">Cement</span>
+      <span class="hud-stat-val" id="hud-cement" style="color:var(--cement)">0</span>
+    </div>
+    <div class="hud-stat" style="margin-left:10px">
+      <span class="hud-stat-label">Steel</span>
+      <span class="hud-stat-val" id="hud-steel" style="color:var(--steel)">0</span>
+    </div>
+    <div class="hud-stat" style="margin-left:10px">
+      <span class="hud-stat-label">Rubber</span>
+      <span class="hud-stat-val" id="hud-rubber" style="color:var(--rubber)">0</span>
+    </div>
+
+    <div id="hud-spacer"></div>
+
+    <button class="hud-btn" onclick="togglePanel('panel-market')">📈 Market</button>
+    <button class="hud-btn" onclick="togglePanel('panel-contracts')">📋 Contracts</button>
+    <button class="hud-btn" id="build-mode-btn" onclick="enterBuildMode()">🏭 Build</button>
+
+    <div class="hud-sep"></div>
+
+    <div id="hud-turn">T:0</div>
+    <button id="pause-btn" onclick="togglePause()">⏸ PAUSE</button>
+  </div>
+
+  <!-- PANEL: BUILD FACTORY -->
+  <div class="overlay-panel" id="panel-build">
+    <div class="panel-header">
+      <span class="panel-title">Build Factory</span>
+      <button class="panel-close" onclick="closePanel('panel-build')">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="section-label">Location</div>
+      <div class="field-row">
+        <span class="field-label">Selected tile</span>
+        <span class="field-val" id="build-tile-pos">—</span>
+      </div>
+      <div class="field-row">
+        <span class="field-label">Peninsula</span>
+        <span class="field-val" id="build-tile-pen">—</span>
+      </div>
+      <div class="field-row">
+        <span class="field-label">Terrain</span>
+        <span class="field-val" id="build-tile-terrain">—</span>
+      </div>
+
+      <div class="section-label">Commodity</div>
+      <div style="display:flex; gap:8px; margin-bottom:12px">
+        <button class="btn-secondary" id="build-cement-btn" onclick="selectBuildCommodity('cement')">🪨 Cement</button>
+        <button class="btn-secondary" id="build-steel-btn"  onclick="selectBuildCommodity('steel')">⚙️ Steel</button>
+        <button class="btn-secondary" id="build-rubber-btn" onclick="selectBuildCommodity('rubber')">🌿 Rubber</button>
+      </div>
+
+      <div class="section-label">Production Targets</div>
+      <div class="field-row">
+        <span class="field-label">Buy raw mat/tick</span>
+        <input type="number" id="build-buy-rate" value="1" min="0" max="10" step="0.5">
+      </div>
+      <div class="field-row">
+        <span class="field-label">Output units/tick</span>
+        <input type="number" id="build-output-rate" value="1" min="0" max="10" step="0.5">
+      </div>
+      <div class="field-row">
+        <span class="field-label">Sell via</span>
+        <select id="build-sell-via">
+          <option value="market">Open Market</option>
+          <option value="contract">Contracts Only</option>
+          <option value="both">Both</option>
+        </select>
+      </div>
+
+      <div class="section-label">Cost</div>
+      <div class="field-row">
+        <span class="field-label">Setup cost</span>
+        <span class="field-val gold">$1.00</span>
+      </div>
+      <div class="field-row">
+        <span class="field-label">Maintenance</span>
+        <span class="field-val">$0.01 / tick</span>
+      </div>
+    </div>
+    <div class="panel-footer">
+      <button class="btn-secondary" onclick="closePanel('panel-build')">Cancel</button>
+      <button class="btn-primary" id="build-confirm-btn" onclick="confirmBuild()" disabled>Build — $1.00</button>
+    </div>
+  </div>
+
+  <!-- PANEL: FACTORY DETAIL -->
+  <div class="overlay-panel" id="panel-factory">
+    <div class="panel-header">
+      <span class="panel-title" id="factory-panel-title">Factory</span>
+      <button class="panel-close" onclick="closePanel('panel-factory')">✕</button>
+    </div>
+    <div class="panel-body" id="factory-panel-body">
+      <!-- populated by renderFactoryPanel() -->
+    </div>
+    <div class="panel-footer">
+      <button class="btn-danger" id="factory-demolish-btn" onclick="demolishSelectedFactory()">Demolish</button>
+      <button class="btn-secondary" onclick="closePanel('panel-factory')">Close</button>
+      <button class="btn-primary" id="factory-save-btn" onclick="saveFactorySettings()">Save</button>
+    </div>
+  </div>
+
+  <!-- PANEL: MARKET -->
+  <div class="overlay-panel" id="panel-market">
+    <div class="panel-header">
+      <span class="panel-title">Open Market</span>
+      <button class="panel-close" onclick="closePanel('panel-market')">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="market-row market-header">
+        <span>Commodity</span>
+        <span>Price</span>
+        <span>Supply</span>
+        <span>Demand</span>
+        <span>History</span>
+      </div>
+      <div id="market-rows"><!-- populated by renderMarket() --></div>
+
+      <div class="section-label" style="margin-top:18px">Quick Trade</div>
+      <div class="field-row">
+        <span class="field-label">Commodity</span>
+        <select id="trade-commodity">
+          <option value="cement">Cement</option>
+          <option value="steel">Steel</option>
+          <option value="rubber">Rubber</option>
+        </select>
+      </div>
+      <div class="field-row">
+        <span class="field-label">Amount</span>
+        <input type="number" id="trade-amount" value="1" min="1" max="100">
+      </div>
+      <div style="display:flex; gap:8px; margin-top:8px">
+        <button class="btn-primary" onclick="quickTrade('buy')" style="flex:1">Buy</button>
+        <button class="btn-secondary" onclick="quickTrade('sell')" style="flex:1">Sell</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PANEL: CONTRACTS -->
+  <div class="overlay-panel" id="panel-contracts">
+    <div class="panel-header">
+      <span class="panel-title">Contracts</span>
+      <button class="panel-close" onclick="closePanel('panel-contracts')">✕</button>
+    </div>
+    <div class="panel-body">
+      <div class="section-label">Incoming Offers</div>
+      <div id="contracts-incoming"><!-- populated by renderContracts() --></div>
+
+      <div class="section-label">Active Contracts</div>
+      <div id="contracts-active"><!-- populated by renderContracts() --></div>
+
+      <div class="section-label">Propose Contract</div>
+      <div class="field-row">
+        <span class="field-label">Offer to rival</span>
+        <select id="propose-rival">
+          <option value="A">Rival A (Peninsula A)</option>
+          <option value="B">Rival B (Peninsula B)</option>
+          <option value="C">Rival C (Peninsula C)</option>
+        </select>
+      </div>
+      <div class="field-row">
+        <span class="field-label">Commodity</span>
+        <select id="propose-commodity">
+          <option value="cement">Cement</option>
+          <option value="steel">Steel</option>
+          <option value="rubber">Rubber</option>
+        </select>
+      </div>
+      <div class="field-row">
+        <span class="field-label">Units/tick</span>
+        <input type="number" id="propose-units" value="1" min="1" max="20">
+      </div>
+      <div class="field-row">
+        <span class="field-label">Price/unit</span>
+        <input type="number" id="propose-price" value="1.00" min="0.01" step="0.01">
+      </div>
+      <div class="field-row">
+        <span class="field-label">Duration (ticks)</span>
+        <input type="number" id="propose-duration" value="50" min="10" max="500" step="10">
+      </div>
+      <button class="btn-primary" style="width:100%; margin-top:8px" onclick="proposeContract()">Send Proposal</button>
+    </div>
+  </div>
+
+  <!-- PANEL: SCORE (end game) -->
+  <div class="overlay-panel" id="panel-score">
+    <div class="panel-header">
+      <span class="panel-title">Game Over</span>
+      <button class="panel-close" onclick="closePanel('panel-score')">✕</button>
+    </div>
+    <div class="panel-body" style="text-align:center; padding:24px">
+      <div class="score-label" id="score-reason">TIME'S UP</div>
+      <div class="score-big" id="score-value">$0</div>
+      <div class="score-label">FINAL NET WORTH</div>
+      <div style="margin-top:24px; font-size:13px; color:var(--textdim)" id="score-breakdown"></div>
+    </div>
+    <div class="panel-footer" style="justify-content:center">
+      <button class="btn-primary" onclick="restartGame()">Play Again</button>
+    </div>
+  </div>
+
+  <!-- TOOLTIP -->
+  <div id="tooltip"></div>
+
+  <!-- NOTIFICATIONS -->
+  <div id="notif-stack"></div>
+
+  <!-- MODE INDICATOR -->
+  <div id="mode-indicator">Mode: <span id="mode-label">Inspect</span></div>
+
+</div><!-- #game-root -->
+
+<script>
+'use strict';
+
+/* ============================================================
+   6. CONSTANTS
+   ============================================================ */
+const COLS = 20;
+const ROWS = 16;
+const TICK_MS = 1000;           // 1 real second = 1 game tick
+const GAME_DURATION_TICKS = 300; // 5 minutes of real time
+
+const COMMODITIES = ['cement', 'steel', 'rubber'];
+
+const COMMODITY_EMOJI = { cement: '🪨', steel: '⚙️', rubber: '🌿' };
+
+const PENINSULA_DEFS = {
+  // id, name, natural advantage commodity, color var
+  A: { name: 'Astra',  advantage: 'cement', color: '#e8c840' },
+  B: { name: 'Boreal', advantage: 'steel',  color: '#7ab8d4' },
+  C: { name: 'Calyx',  advantage: 'rubber', color: '#8cc870' },
+};
+
+// Base market prices
+const BASE_PRICES = { cement: 1.0, steel: 1.5, rubber: 1.2 };
+
+// How quickly price responds to supply/demand imbalance
+const PRICE_ELASTICITY = 0.04;
+
+// AI rival definitions (one per peninsula)
+const RIVAL_DEFS = {
+  A: { name: 'Astra Corp',   peninsula: 'A', strategy: 'aggressive', color: '#e05050' },
+  B: { name: 'Boreal Inc',   peninsula: 'B', strategy: 'balanced',   color: '#7ab8d4' },
+  C: { name: 'Calyx Ltd',    peninsula: 'C', strategy: 'passive',    color: '#c870a0' },
+};
+
+const FACTORY_SETUP_COST = 1.00;
+const FACTORY_MAINTENANCE = 0.01; // per tick
+
+const TERRAIN_EMOJIS = {
+  sea: '🌊', coast: '〰', plains: '·', forest: '🌲', hills: '⛰', resource: '💎',
+};
+
+/* ============================================================
+   7. STATE
+   ============================================================ */
+let G = {}; // Game state — reset on restartGame()
+
+function createInitialState() {
+  return {
+    tick: 0,
+    paused: false,
+    gameOver: false,
+    mode: 'inspect', // 'inspect' | 'build'
+    selectedCell: null,
+    selectedFactory: null,
+    buildCommodity: null,
+
+    player: {
+      cash: 100.00,
+      inventory: { cement: 0, steel: 0, rubber: 0 },
+      factories: [], // array of factory objects
+      contracts: [], // active contracts (as seller)
+    },
+
+    market: {
+      prices: { ...BASE_PRICES },
+      priceHistory: {
+        cement: [BASE_PRICES.cement],
+        steel:  [BASE_PRICES.steel],
+        rubber: [BASE_PRICES.rubber],
+      },
+      supply: { cement: 50, steel: 40, rubber: 30 }, // passive pool units
+      demand: { cement: 40, steel: 35, rubber: 30 },
+    },
+
+    rivals: {
+      A: createRival('A'),
+      B: createRival('B'),
+      C: createRival('C'),
+    },
+
+    contracts: {
+      incoming: [], // pending offers to player
+      active: [],   // accepted & running contracts
+    },
+
+    grid: [],       // flat array of cell objects, length COLS*ROWS
+    notifications: [],
+  };
+}
+
+function createRival(id) {
+  const def = RIVAL_DEFS[id];
+  return {
+    id,
+    name: def.name,
+    peninsula: def.peninsula,
+    strategy: def.strategy,
+    cash: 50,
+    inventory: { cement: 0, steel: 0, rubber: 0 },
+    factories: [],
+    contractCooldown: 0,
+  };
+}
+
+function createFactory(opts) {
+  return {
+    id: `f_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+    owner: opts.owner,         // 'player' | rival id
+    commodity: opts.commodity,
+    cellIndex: opts.cellIndex,
+    peninsula: opts.peninsula,
+    level: 1,                  // 1–3
+    buyRate: opts.buyRate || 1,
+    outputRate: opts.outputRate || 1,
+    sellVia: opts.sellVia || 'market',
+    active: true,
+    ticksOld: 0,
+    // stats
+    totalProduced: 0,
+    totalRevenue: 0,
+  };
+}
+
+/* ============================================================
+   8. MAP GENERATION
+   ============================================================ */
+
+// Peninsula layout: fixed shapes on a 20×16 grid
+// A = left peninsula, B = top-right, C = bottom-right
+// Sea fills remaining cells
+
+function generateMap() {
+  const cells = [];
+  for (let i = 0; i < COLS * ROWS; i++) {
+    cells.push({ terrain: 'sea', peninsula: null, building: null });
+  }
+
+  function idx(c, r) { return r * COLS + c; }
+  function inBounds(c, r) { return c >= 0 && c < COLS && r >= 0 && r < ROWS; }
+
+  // Define peninsula masks (simplified elliptic + noise shapes)
+  const peninsulas = [
+    { id: 'A', cx: 4, cy: 8, rx: 4, ry: 6 },
+    { id: 'B', cx: 13, cy: 4, rx: 5, ry: 4 },
+    { id: 'C', cx: 14, cy: 12, rx: 4, ry: 3 },
+  ];
+
+  peninsulas.forEach(p => {
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const dx = (c - p.cx) / p.rx;
+        const dy = (r - p.cy) / p.ry;
+        if (dx * dx + dy * dy <= 1) {
+          const cell = cells[idx(c, r)];
+          if (!cell.peninsula) { // don't overwrite
+            cell.peninsula = p.id;
+            // Terrain by distance from center + noise
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const noise = (seededRand(c * 31 + r * 17) - 0.5) * 0.3;
+            if (dist + noise < 0.25) {
+              cell.terrain = seededRand(c + r * 100) < 0.15 ? 'resource' : 'plains';
+            } else if (dist + noise < 0.6) {
+              const t = seededRand(c * 7 + r * 13);
+              cell.terrain = t < 0.3 ? 'forest' : t < 0.5 ? 'hills' : 'plains';
+            } else {
+              cell.terrain = 'coast';
+            }
+          }
+        }
+      }
+    }
+  });
+
+  return cells;
+}
+
+// Simple deterministic pseudo-random (for consistent map)
+function seededRand(n) {
+  const x = Math.sin(n + 1) * 10000;
+  return x - Math.floor(x);
+}
+
+/* ============================================================
+   9. MARKET ENGINE
+   ============================================================ */
+
+function marketTick() {
+  const mkt = G.market;
+
+  COMMODITIES.forEach(c => {
+    // Passive pool regenerates slowly
+    mkt.supply[c] = Math.max(0, mkt.supply[c] + 2);
+    mkt.demand[c] = Math.max(0, mkt.demand[c] + 1.5);
+
+    // AI rivals add to supply/demand
+    Object.values(G.rivals).forEach(r => {
+      const advantage = PENINSULA_DEFS[r.peninsula].advantage;
+      if (advantage === c) mkt.supply[c] += 1.5;
+      else mkt.demand[c] += 0.5;
+    });
+
+    // Player factories add supply
+    G.player.factories.filter(f => f.commodity === c && f.active).forEach(() => {
+      mkt.supply[c] += 0.5;
+    });
+
+    // Price adjusts toward supply/demand balance
+    const imbalance = mkt.demand[c] - mkt.supply[c];
+    const change = imbalance * PRICE_ELASTICITY * (Math.random() * 0.5 + 0.75);
+    mkt.prices[c] = Math.max(0.10, mkt.prices[c] + change * 0.01);
+
+    // Natural price mean-reversion
+    mkt.prices[c] += (BASE_PRICES[c] - mkt.prices[c]) * 0.005;
+
+    // Record history (keep last 8)
+    mkt.priceHistory[c].push(parseFloat(mkt.prices[c].toFixed(3)));
+    if (mkt.priceHistory[c].length > 8) mkt.priceHistory[c].shift();
+  });
+}
+
+function marketBuy(commodity, amount) {
+  const price = G.market.prices[commodity];
+  const cost = price * amount;
+  if (G.player.cash < cost) { notify('Not enough cash!', 'bad'); return false; }
+  G.player.cash -= cost;
+  G.player.inventory[commodity] += amount;
+  G.market.demand[commodity] += amount * 2; // buying drives demand
+  notify(`Bought ${amount} ${commodity} @ $${price.toFixed(2)}`, 'good');
+  return true;
+}
+
+function marketSell(commodity, amount) {
+  if (G.player.inventory[commodity] < amount) { notify('Not enough inventory!', 'bad'); return false; }
+  const price = G.market.prices[commodity];
+  const revenue = price * amount;
+  G.player.cash += revenue;
+  G.player.inventory[commodity] -= amount;
+  G.market.supply[commodity] += amount * 2; // selling drives supply
+  notify(`Sold ${amount} ${commodity} @ $${price.toFixed(2)}`, 'good');
+  return true;
+}
+
+/* ============================================================
+   10. AI RIVALS
+   ============================================================ */
+
+function rivalsTick() {
+  Object.values(G.rivals).forEach(rival => {
+    // Pay maintenance
+    rival.cash -= rival.factories.length * FACTORY_MAINTENANCE;
+
+    // Build factories occasionally based on strategy
+    const buildChance = { aggressive: 0.03, balanced: 0.015, passive: 0.006 }[rival.strategy];
+    if (Math.random() < buildChance && rival.cash > FACTORY_SETUP_COST * 2) {
+      const commodity = PENINSULA_DEFS[rival.peninsula].advantage;
+      const candidateCells = G.grid
+        .map((cell, i) => ({ cell, i }))
+        .filter(({ cell }) => cell.peninsula === rival.peninsula && cell.terrain !== 'sea' && cell.terrain !== 'coast' && !cell.building);
+      if (candidateCells.length > 0) {
+        const pick = candidateCells[Math.floor(Math.random() * candidateCells.length)];
+        const f = createFactory({ owner: rival.id, commodity, cellIndex: pick.i, peninsula: rival.peninsula });
+        rival.factories.push(f);
+        rival.cash -= FACTORY_SETUP_COST;
+        G.grid[pick.i].building = { type: 'factory', owner: rival.id, commodity };
+      }
+    }
+
+    // Produce & sell
+    rival.factories.forEach(f => {
+      const rawCost = G.market.prices[f.commodity] * 0.5 * f.outputRate;
+      if (rival.cash < rawCost) return;
+      rival.cash -= rawCost;
+      const produced = f.outputRate * f.level;
+      const sellPrice = G.market.prices[f.commodity] * (0.9 + Math.random() * 0.2);
+      const revenue = produced * sellPrice;
+      rival.cash += revenue;
+      G.market.supply[f.commodity] += produced;
+      f.totalProduced += produced;
+      f.totalRevenue += revenue;
+    });
+
+    // Propose contract to player occasionally
+    if (rival.contractCooldown <= 0 && Math.random() < 0.005 && G.contracts.incoming.length < 3) {
+      const commodity = PENINSULA_DEFS[rival.peninsula].advantage;
+      const price = parseFloat((G.market.prices[commodity] * (0.85 + Math.random() * 0.3)).toFixed(2));
+      const units = Math.ceil(Math.random() * 5) + 1;
+      const duration = (Math.floor(Math.random() * 5) + 2) * 10;
+      G.contracts.incoming.push({
+        id: `c_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+        from: rival.id,
+        fromName: rival.name,
+        commodity,
+        units,     // units/tick they want to buy FROM player
+        price,
+        duration,
+        ticksLeft: duration,
+      });
+      rival.contractCooldown = 30 + Math.floor(Math.random() * 50);
+      notify(`📋 Contract offer from ${rival.name}`, 'neutral');
+    }
+    if (rival.contractCooldown > 0) rival.contractCooldown--;
+  });
+}
+
+/* ============================================================
+   11. FACTORY ENGINE
+   ============================================================ */
+
+function factoriesTick() {
+  let totalIncome = 0;
+
+  G.player.factories.forEach(f => {
+    if (!f.active) return;
+    f.ticksOld++;
+
+    // Pay maintenance
+    if (G.player.cash < FACTORY_MAINTENANCE) {
+      f.active = false;
+      notify(`Factory (${f.commodity}) shut down — no cash!`, 'bad');
+      return;
+    }
+    G.player.cash -= FACTORY_MAINTENANCE;
+
+    // Buy raw materials
+    const rawCost = G.market.prices[f.commodity] * 0.5 * f.buyRate;
+    if (G.player.cash < rawCost) return; // skip if can't afford
+    G.player.cash -= rawCost;
+    G.market.demand[f.commodity] += f.buyRate;
+
+    // Produce output
+    const produced = f.outputRate * f.level;
+    f.totalProduced += produced;
+
+    // Fulfill active contracts first
+    let contractFulfilled = 0;
+    G.contracts.active.forEach(c => {
+      if (c.sellerFactory !== f.id) return;
+      const deliver = Math.min(c.units, produced - contractFulfilled);
+      if (deliver <= 0) return;
+      const revenue = deliver * c.price;
+      G.player.cash += revenue;
+      totalIncome += revenue;
+      f.totalRevenue += revenue;
+      contractFulfilled += deliver;
+      c.ticksLeft--;
+    });
+
+    // Sell remainder on open market (if enabled)
+    const remainder = produced - contractFulfilled;
+    if (remainder > 0 && (f.sellVia === 'market' || f.sellVia === 'both')) {
+      const sellPrice = G.market.prices[f.commodity];
+      const revenue = remainder * sellPrice;
+      G.player.cash += revenue;
+      totalIncome += revenue;
+      f.totalRevenue += revenue;
+      G.market.supply[f.commodity] += remainder;
+    } else if (remainder > 0) {
+      // contracts only — accumulate in inventory
+      G.player.inventory[f.commodity] += remainder;
+    }
+  });
+
+  // Remove expired contracts
+  G.contracts.active = G.contracts.active.filter(c => {
+    if (c.ticksLeft <= 0) { notify(`Contract with ${c.buyerName} expired`, 'neutral'); return false; }
+    return true;
+  });
+
+  return totalIncome;
+}
+
+/* ============================================================
+   12. CONTRACT ENGINE
+   ============================================================ */
+
+function acceptContract(contractId) {
+  const idx = G.contracts.incoming.findIndex(c => c.id === contractId);
+  if (idx === -1) return;
+  const contract = G.contracts.incoming[idx];
+
+  // Assign to first available factory with matching commodity
+  const factory = G.player.factories.find(f => f.commodity === contract.commodity && f.active);
+  if (!factory) { notify(`No ${contract.commodity} factory to fulfill this!`, 'bad'); return; }
+
+  contract.sellerFactory = factory.id;
+  contract.buyerName = contract.fromName;
+  G.contracts.active.push(contract);
+  G.contracts.incoming.splice(idx, 1);
+  notify(`✅ Contract accepted with ${contract.fromName}`, 'good');
+  renderContracts();
+}
+
+function rejectContract(contractId) {
+  G.contracts.incoming = G.contracts.incoming.filter(c => c.id !== contractId);
+  renderContracts();
+}
+
+function proposeContract() {
+  const rival = document.getElementById('propose-rival').value;
+  const commodity = document.getElementById('propose-commodity').value;
+  const units = parseFloat(document.getElementById('propose-units').value);
+  const price = parseFloat(document.getElementById('propose-price').value);
+  const duration = parseInt(document.getElementById('propose-duration').value);
+
+  const rivalDef = G.rivals[rival];
+  // Simple AI acceptance: accept if price is >= market price * 0.8
+  const marketPrice = G.market.prices[commodity];
+  if (price < marketPrice * 0.7) {
+    notify(`${rivalDef.name} rejected your offer — price too low`, 'bad');
+    return;
+  }
+
+  const factory = G.player.factories.find(f => f.commodity === commodity && f.active);
+  if (!factory) { notify(`You need a ${commodity} factory first!`, 'bad'); return; }
+
+  const contract = {
+    id: `c_${Date.now()}`,
+    from: 'player',
+    fromName: 'You',
+    buyerName: rivalDef.name,
+    sellerFactory: factory.id,
+    commodity, units, price, duration,
+    ticksLeft: duration,
+  };
+
+  G.contracts.active.push(contract);
+  notify(`📋 ${rivalDef.name} accepted your contract!`, 'good');
+  renderContracts();
+}
+
+/* ============================================================
+   13. GAME LOOP
+   ============================================================ */
+
+let _loopInterval = null;
+let _lastIncome = 0;
+
+function startLoop() {
+  if (_loopInterval) clearInterval(_loopInterval);
+  _loopInterval = setInterval(gameTick, TICK_MS);
+}
+
+function stopLoop() {
+  if (_loopInterval) { clearInterval(_loopInterval); _loopInterval = null; }
+}
+
+function togglePause() {
+  G.paused = !G.paused;
+  const btn = document.getElementById('pause-btn');
+  if (G.paused) {
+    stopLoop();
+    btn.textContent = '▶ RESUME';
+    btn.classList.add('paused');
+  } else {
+    startLoop();
+    btn.textContent = '⏸ PAUSE';
+    btn.classList.remove('paused');
+  }
+}
+
+function gameTick() {
+  if (G.paused || G.gameOver) return;
+  G.tick++;
+
+  marketTick();
+  rivalsTick();
+  _lastIncome = factoriesTick();
+
+  // Bankruptcy check
+  if (G.player.cash <= 0) {
+    G.player.cash = 0;
+    endGame('BANKRUPT');
+    return;
+  }
+
+  // Time's up
+  if (G.tick >= GAME_DURATION_TICKS) {
+    endGame('TIME\'S UP');
+    return;
+  }
+
+  renderHUD();
+  renderMarket();
+  renderMapOverlays();
+  if (document.getElementById('panel-contracts').classList.contains('open')) renderContracts();
+}
+
+function endGame(reason) {
+  G.gameOver = true;
+  stopLoop();
+  const netWorth = G.player.cash
+    + COMMODITIES.reduce((s, c) => s + G.player.inventory[c] * G.market.prices[c], 0)
+    + G.player.factories.length * (FACTORY_SETUP_COST * 0.5);
+  document.getElementById('score-reason').textContent = reason;
+  document.getElementById('score-value').textContent = `$${netWorth.toFixed(2)}`;
+  document.getElementById('score-breakdown').innerHTML =
+    `Cash: $${G.player.cash.toFixed(2)}<br>` +
+    COMMODITIES.map(c => `${COMMODITY_EMOJI[c]} ${c}: ${G.player.inventory[c].toFixed(1)} units`).join('<br>') +
+    `<br>Factories: ${G.player.factories.length}`;
+  openPanel('panel-score');
+}
+
+function restartGame() {
+  stopLoop();
+  closePanel('panel-score');
+  initGame();
+}
+
+/* ============================================================
+   14. RENDER
+   ============================================================ */
+
+function renderHUD() {
+  document.getElementById('hud-cash').textContent = `$${G.player.cash.toFixed(2)}`;
+  const incomeEl = document.getElementById('hud-income');
+  incomeEl.textContent = `$${_lastIncome.toFixed(2)}`;
+  incomeEl.className = 'hud-stat-val ' + (_lastIncome > 0 ? 'green' : _lastIncome < 0 ? 'red' : '');
+  document.getElementById('hud-factories').textContent = G.player.factories.filter(f => f.active).length;
+  document.getElementById('hud-cement').textContent = G.player.inventory.cement.toFixed(1);
+  document.getElementById('hud-steel').textContent = G.player.inventory.steel.toFixed(1);
+  document.getElementById('hud-rubber').textContent = G.player.inventory.rubber.toFixed(1);
+  document.getElementById('hud-turn').textContent = `T:${G.tick}/${GAME_DURATION_TICKS}`;
+}
+
+function renderMapFull() {
+  const grid = document.getElementById('map-grid');
+  grid.innerHTML = '';
+  G.grid.forEach((cell, i) => {
+    const c = i % COLS, r = Math.floor(i / COLS);
+    const div = document.createElement('div');
+    div.className = 'cell';
+    div.dataset.index = i;
+    div.dataset.terrain = cell.terrain;
+    if (cell.peninsula) div.dataset.peninsula = cell.peninsula;
+
+    div.textContent = TERRAIN_EMOJIS[cell.terrain] || '';
+
+    if (cell.building) {
+      const overlay = document.createElement('div');
+      overlay.className = 'cell-overlay';
+      overlay.textContent = COMMODITY_EMOJI[cell.building.commodity] || '🏭';
+      div.appendChild(overlay);
+
+      if (cell.building.owner) {
+        const dot = document.createElement('div');
+        dot.className = 'cell-owner';
+        dot.style.background = cell.building.owner === 'player'
+          ? '#e8c840'
+          : RIVAL_DEFS[cell.building.owner]?.color || '#888';
+        div.appendChild(dot);
+      }
+    }
+
+    div.addEventListener('click', () => onCellClick(i));
+    div.addEventListener('mousemove', e => onCellHover(e, i));
+    div.addEventListener('mouseleave', hideTooltip);
+    grid.appendChild(div);
+  });
+}
+
+function renderMapOverlays() {
+  // Only update building overlays without full re-render (performance)
+  G.grid.forEach((cell, i) => {
+    const div = document.querySelector(`.cell[data-index="${i}"]`);
+    if (!div) return;
+    // Update building overlay if present
+    const existingOverlay = div.querySelector('.cell-overlay');
+    if (cell.building && !existingOverlay) {
+      const overlay = document.createElement('div');
+      overlay.className = 'cell-overlay';
+      overlay.textContent = COMMODITY_EMOJI[cell.building.commodity] || '🏭';
+      div.appendChild(overlay);
+      const dot = document.createElement('div');
+      dot.className = 'cell-owner';
+      dot.style.background = cell.building.owner === 'player'
+        ? '#e8c840'
+        : RIVAL_DEFS[cell.building.owner]?.color || '#888';
+      div.appendChild(dot);
+    } else if (!cell.building && existingOverlay) {
+      existingOverlay.remove();
+      const dot = div.querySelector('.cell-owner');
+      if (dot) dot.remove();
+    }
+  });
+}
+
+function renderMarket() {
+  const container = document.getElementById('market-rows');
+  if (!container) return;
+  container.innerHTML = COMMODITIES.map(c => {
+    const price = G.market.prices[c];
+    const hist = G.market.priceHistory[c];
+    const prev = hist.length > 1 ? hist[hist.length - 2] : price;
+    const dir = price > prev ? 'up' : price < prev ? 'down' : 'flat';
+    const arrow = { up: '▲', down: '▼', flat: '—' }[dir];
+    const maxH = Math.max(...hist, 0.01);
+    const sparkBars = hist.map(v =>
+      `<div class="spark-bar" style="height:${Math.round((v/maxH)*18)+2}px;background:var(--${dir === 'up' ? 'green' : dir === 'down' ? 'red' : 'border2'})"></div>`
+    ).join('');
+
+    return `<div class="market-row">
+      <span><span class="chip chip-${c}">${COMMODITY_EMOJI[c]} ${c}</span></span>
+      <span class="price-${dir}">${arrow} $${price.toFixed(3)}</span>
+      <span style="color:var(--textdim)">${G.market.supply[c].toFixed(0)}</span>
+      <span style="color:var(--textdim)">${G.market.demand[c].toFixed(0)}</span>
+      <span class="spark">${sparkBars}</span>
+    </div>`;
+  }).join('');
+}
+
+function renderContracts() {
+  const incoming = document.getElementById('contracts-incoming');
+  const active = document.getElementById('contracts-active');
+
+  if (G.contracts.incoming.length === 0) {
+    incoming.innerHTML = '<div style="color:var(--dim);font-size:12px;font-family:\'Syne Mono\',monospace">No pending offers</div>';
+  } else {
+    incoming.innerHTML = G.contracts.incoming.map(c => `
+      <div class="contract-row">
+        <div class="contract-meta">
+          <span class="contract-from">${c.fromName}</span>
+          <span class="chip chip-${c.commodity}">${COMMODITY_EMOJI[c.commodity]} ${c.commodity}</span>
+        </div>
+        <div class="contract-terms">
+          ${c.units} units/tick @ $${c.price.toFixed(2)} for ${c.duration} ticks
+        </div>
+        <div class="contract-actions">
+          <button class="btn-accept" onclick="acceptContract('${c.id}')">Accept</button>
+          <button class="btn-reject" onclick="rejectContract('${c.id}')">Reject</button>
+        </div>
+      </div>`).join('');
+  }
+
+  if (G.contracts.active.length === 0) {
+    active.innerHTML = '<div style="color:var(--dim);font-size:12px;font-family:\'Syne Mono\',monospace">No active contracts</div>';
+  } else {
+    active.innerHTML = G.contracts.active.map(c => `
+      <div class="active-contract-row">
+        <span>${COMMODITY_EMOJI[c.commodity]} ${c.units}/tick → ${c.buyerName}</span>
+        <span style="color:var(--gold)">$${c.price.toFixed(2)}/u</span>
+        <span style="color:var(--dim)">${c.ticksLeft}t left</span>
+      </div>`).join('');
+  }
+}
+
+function renderFactoryPanel(factory) {
+  const def = factory;
+  document.getElementById('factory-panel-title').textContent =
+    `${COMMODITY_EMOJI[def.commodity]} ${def.commodity.charAt(0).toUpperCase() + def.commodity.slice(1)} Factory`;
+
+  const revenue = def.totalRevenue.toFixed(2);
+  const produced = def.totalProduced.toFixed(1);
+  const util = Math.min(100, (def.outputRate / (def.level * 2)) * 100).toFixed(0);
+
+  document.getElementById('factory-panel-body').innerHTML = `
+    <div class="section-label">Status</div>
+    <div class="field-row">
+      <span class="field-label">Active</span>
+      <span class="field-val" style="color:${def.active ? 'var(--green)' : 'var(--red)'}">
+        ${def.active ? '● Running' : '● Stopped'}
+      </span>
+    </div>
+    <div class="field-row">
+      <span class="field-label">Level</span>
+      <span class="field-val">${def.level} / 3</span>
+    </div>
+    <div class="field-row">
+      <span class="field-label">Peninsula</span>
+      <span class="field-val">${PENINSULA_DEFS[def.peninsula].name}</span>
+    </div>
+
+    <div class="section-label">Production Targets</div>
+    <div class="field-row">
+      <span class="field-label">Buy raw/tick</span>
+      <input type="number" id="fp-buy-rate" value="${def.buyRate}" min="0" max="${def.level * 5}" step="0.5">
+    </div>
+    <div class="field-row">
+      <span class="field-label">Output/tick</span>
+      <input type="number" id="fp-output-rate" value="${def.outputRate}" min="0" max="${def.level * 5}" step="0.5">
+    </div>
+    <div class="field-row">
+      <span class="field-label">Sell via</span>
+      <select id="fp-sell-via">
+        <option value="market" ${def.sellVia === 'market' ? 'selected' : ''}>Open Market</option>
+        <option value="contract" ${def.sellVia === 'contract' ? 'selected' : ''}>Contracts Only</option>
+        <option value="both" ${def.sellVia === 'both' ? 'selected' : ''}>Both</option>
+      </select>
+    </div>
+
+    <div class="factory-throughput-bar">
+      <div class="factory-throughput-fill" style="width:${util}%;background:var(--${def.commodity === 'cement' ? 'cement' : def.commodity === 'steel' ? 'steel' : 'rubber'})"></div>
+    </div>
+    <div style="font-size:11px;color:var(--dim);font-family:'Syne Mono',monospace;margin-top:4px">${util}% utilization</div>
+
+    <div class="section-label">Upgrade</div>
+    <div class="field-row">
+      <span class="field-label">Upgrade to L${def.level + 1}</span>
+      ${def.level < 3
+        ? `<button class="btn-primary" onclick="upgradeFactory('${def.id}')" ${G.player.cash < def.level * 2 ? 'disabled' : ''}>$${(def.level * 2).toFixed(2)}</button>`
+        : '<span class="field-val" style="color:var(--dim)">Max level</span>'}
+    </div>
+
+    <div class="section-label">Lifetime Stats</div>
+    <div class="field-row">
+      <span class="field-label">Produced</span>
+      <span class="field-val">${produced} units</span>
+    </div>
+    <div class="field-row">
+      <span class="field-label">Revenue</span>
+      <span class="field-val gold">$${revenue}</span>
+    </div>
+  `;
+}
+
+/* ============================================================
+   15. UI / EVENT HANDLERS
+   ============================================================ */
+
+function openPanel(id) {
+  document.getElementById(id).classList.add('open');
+}
+
+function closePanel(id) {
+  document.getElementById(id).classList.remove('open');
+  if (id === 'panel-build') exitBuildMode();
+}
+
+function togglePanel(id) {
+  const panel = document.getElementById(id);
+  if (panel.classList.contains('open')) {
+    closePanel(id);
+  } else {
+    if (id === 'panel-market') renderMarket();
+    if (id === 'panel-contracts') renderContracts();
+    openPanel(id);
+  }
+}
+
+function enterBuildMode() {
+  G.mode = 'build';
+  G.buildCommodity = null;
+  document.getElementById('mode-label').textContent = 'Build — click a land tile';
+  document.getElementById('build-mode-btn').classList.add('active');
+  document.getElementById('build-confirm-btn').disabled = true;
+  document.getElementById('build-tile-pos').textContent = '—';
+  document.getElementById('build-tile-pen').textContent = '—';
+  document.getElementById('build-tile-terrain').textContent = '—';
+  openPanel('panel-build');
+}
+
+function exitBuildMode() {
+  G.mode = 'inspect';
+  G.buildCommodity = null;
+  G.selectedCell = null;
+  document.getElementById('mode-label').textContent = 'Inspect';
+  document.getElementById('build-mode-btn').classList.remove('active');
+}
+
+function selectBuildCommodity(c) {
+  G.buildCommodity = c;
+  ['cement','steel','rubber'].forEach(x => {
+    document.getElementById(`build-${x}-btn`).classList.toggle('active', x === c);
+  });
+  updateBuildConfirm();
+}
+
+function updateBuildConfirm() {
+  const btn = document.getElementById('build-confirm-btn');
+  btn.disabled = !(G.selectedCell !== null && G.buildCommodity);
+}
+
+function onCellClick(index) {
+  const cell = G.grid[index];
+  const c = index % COLS, r = Math.floor(index / COLS);
+
+  if (G.mode === 'build') {
+    if (cell.terrain === 'sea') { notify('Cannot build on sea!', 'bad'); return; }
+    if (cell.building) { notify('Tile already occupied!', 'bad'); return; }
+    G.selectedCell = index;
+    document.getElementById('build-tile-pos').textContent = `(${c}, ${r})`;
+    document.getElementById('build-tile-pen').textContent = cell.peninsula
+      ? `${PENINSULA_DEFS[cell.peninsula].name} (${cell.peninsula})`
+      : '—';
+    document.getElementById('build-tile-terrain').textContent = cell.terrain;
+    updateBuildConfirm();
+    return;
+  }
+
+  // Inspect mode — open factory panel if factory here
+  if (cell.building && cell.building.owner === 'player') {
+    const factory = G.player.factories.find(f => f.cellIndex === index);
+    if (factory) {
+      G.selectedFactory = factory.id;
+      renderFactoryPanel(factory);
+      openPanel('panel-factory');
+    }
+  }
+}
+
+function onCellHover(e, index) {
+  const cell = G.grid[index];
+  const col = index % COLS, row = Math.floor(index / COLS);
+  let html = `<b>${cell.terrain}</b> (${col},${row})`;
+  if (cell.peninsula) {
+    const pDef = PENINSULA_DEFS[cell.peninsula];
+    html += `<br>Peninsula ${pDef.name}`;
+    html += `<br>Advantage: ${COMMODITY_EMOJI[pDef.advantage]} ${pDef.advantage}`;
+  }
+  if (cell.building) {
+    const owner = cell.building.owner === 'player' ? 'You' : RIVAL_DEFS[cell.building.owner]?.name || cell.building.owner;
+    html += `<br>${COMMODITY_EMOJI[cell.building.commodity]} Factory (${owner})`;
+  }
+  showTooltip(e, html);
+}
+
+function confirmBuild() {
+  if (G.selectedCell === null || !G.buildCommodity) return;
+  if (G.player.cash < FACTORY_SETUP_COST) { notify('Not enough cash to build!', 'bad'); return; }
+
+  const cell = G.grid[G.selectedCell];
+  const buyRate = parseFloat(document.getElementById('build-buy-rate').value);
+  const outputRate = parseFloat(document.getElementById('build-output-rate').value);
+  const sellVia = document.getElementById('build-sell-via').value;
+
+  G.player.cash -= FACTORY_SETUP_COST;
+  const factory = createFactory({
+    owner: 'player',
+    commodity: G.buildCommodity,
+    cellIndex: G.selectedCell,
+    peninsula: cell.peninsula,
+    buyRate,
+    outputRate,
+    sellVia,
+  });
+  G.player.factories.push(factory);
+  cell.building = { type: 'factory', owner: 'player', commodity: G.buildCommodity };
+
+  notify(`🏭 ${G.buildCommodity} factory built!`, 'good');
+  closePanel('panel-build');
+  exitBuildMode();
+  renderMapFull();
+  renderHUD();
+}
+
+function saveFactorySettings() {
+  const factory = G.player.factories.find(f => f.id === G.selectedFactory);
+  if (!factory) return;
+  factory.buyRate = parseFloat(document.getElementById('fp-buy-rate').value);
+  factory.outputRate = parseFloat(document.getElementById('fp-output-rate').value);
+  factory.sellVia = document.getElementById('fp-sell-via').value;
+  notify('Factory settings saved', 'good');
+  closePanel('panel-factory');
+}
+
+function upgradeFactory(id) {
+  const factory = G.player.factories.find(f => f.id === id);
+  if (!factory || factory.level >= 3) return;
+  const cost = factory.level * 2;
+  if (G.player.cash < cost) { notify('Not enough cash to upgrade!', 'bad'); return; }
+  G.player.cash -= cost;
+  factory.level++;
+  notify(`⬆ Factory upgraded to Level ${factory.level}!`, 'good');
+  renderFactoryPanel(factory);
+  renderHUD();
+}
+
+function demolishSelectedFactory() {
+  const factory = G.player.factories.find(f => f.id === G.selectedFactory);
+  if (!factory) return;
+  G.grid[factory.cellIndex].building = null;
+  G.player.factories = G.player.factories.filter(f => f.id !== G.selectedFactory);
+  G.selectedFactory = null;
+  closePanel('panel-factory');
+  renderMapFull();
+  renderHUD();
+  notify('Factory demolished', 'neutral');
+}
+
+function quickTrade(direction) {
+  const commodity = document.getElementById('trade-commodity').value;
+  const amount = parseFloat(document.getElementById('trade-amount').value);
+  if (isNaN(amount) || amount <= 0) { notify('Invalid amount', 'bad'); return; }
+  if (direction === 'buy') marketBuy(commodity, amount);
+  else marketSell(commodity, amount);
+  renderHUD();
+  renderMarket();
+}
+
+function showTooltip(e, html) {
+  const tt = document.getElementById('tooltip');
+  tt.innerHTML = html;
+  tt.classList.add('visible');
+  tt.style.left = (e.clientX + 14) + 'px';
+  tt.style.top  = (e.clientY - 10) + 'px';
+}
+
+function hideTooltip() {
+  document.getElementById('tooltip').classList.remove('visible');
+}
+
+function notify(msg, type = 'neutral') {
+  const stack = document.getElementById('notif-stack');
+  const el = document.createElement('div');
+  el.className = `notif${type === 'good' ? ' notif-good' : type === 'bad' ? ' notif-bad' : ''}`;
+  el.textContent = msg;
+  stack.appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+/* ============================================================
+   16. INIT
+   ============================================================ */
+
+function initGame() {
+  G = createInitialState();
+  G.grid = generateMap();
+
+  // Place 1 starter rival factory per peninsula
+  Object.values(G.rivals).forEach(rival => {
+    const commodity = PENINSULA_DEFS[rival.peninsula].advantage;
+    const candidates = G.grid
+      .map((cell, i) => ({ cell, i }))
+      .filter(({ cell }) => cell.peninsula === rival.peninsula && cell.terrain === 'plains');
+    if (candidates.length > 0) {
+      const pick = candidates[Math.floor(candidates.length / 2)];
+      const f = createFactory({ owner: rival.id, commodity, cellIndex: pick.i, peninsula: rival.peninsula });
+      rival.factories.push(f);
+      G.grid[pick.i].building = { type: 'factory', owner: rival.id, commodity };
+    }
+  });
+
+  renderMapFull();
+  renderHUD();
+  renderMarket();
+  renderContracts();
+  startLoop();
+}
+
+initGame();
+</script>
+</body>
+</html>
